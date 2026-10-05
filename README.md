@@ -1,3 +1,33 @@
+# 营销通鉴 · 营销行业版 AIHOT
+
+这是基于 [AIHOT](https://github.com/KKKKhazix/AIHOT)（MIT）改成的**营销行业版本**，给 [营销通鉴](https://yingxiaoclub.com/news) 的「平台动态」栏目提供内容。AIHOT 的名字和 Logo 不在许可范围内，这里只用它的引擎。
+
+本仓库和上游的区别，主要在 `industry/`、`site/site.ts` 和部署文件里；框架代码没有改。下方从分隔线开始是 AIHOT 原来的说明。
+
+## 改了什么
+
+| 位置 | 内容 |
+|---|---|
+| `industry/taxonomy.ts` | 分类按平台分：小红书、抖音、视频号、私域、电商、AI、综合（key 和营销通鉴网站的栏目一致）；标签、公司名录、身份词典换成营销行业 |
+| `industry/topics.json` | 35 个主题：平台与公司、营销方向（种草、直播、达人、投放、大促……）、内容形态 |
+| `industry/sources.json` | 首批 9 个信源：数英、虎嗅、量子位（RSS）；SocialBeta、广告门、Morketing、艾瑞、CBNData、Campaign Asia（网页列表，选择器实测过） |
+| `industry/prompts/` | 预筛改成营销相关性；评分换成营销从业者视角，平台规则和功能变化权重高，普通联名、代言、广告片压低；推荐理由优先写「对运营的影响」；术语规则换成营销行业 |
+| `industry/selection.ts` | 媒体（T2）门槛从 76 降到 68，原因写在文件注释里 |
+| `tests/` | 测试样例里的 AI 公司和分类换成营销行业的，规则本身没改 |
+
+## 在国内服务器上部署
+
+服务器连不上 GitHub 和 Docker Hub 时：
+
+1. `.github/workflows/docker-image.yml`：推到 main 后构建镜像，先推 ghcr，再用 skopeo 复制到腾讯云镜像仓库。需要 Secrets：`TCR_USERNAME`、`TCR_PASSWORD`、`TCR_NAMESPACE`。
+2. `docker-compose.dokploy.yml`：服务器用的部署文件，镜像从环境变量 `AIHOT_IMAGE`、`POSTGRES_IMAGE` 读，后台只绑服务器本机 3100 端口，`api` 接入 Dokploy 的共享网络（别名 `aihot-api`）。在 Dokploy 里用 Compose 的 Raw 方式粘贴这个文件。
+3. 服务器先 `docker login ccr.ccs.tencentyun.com`，否则拉私有镜像会报 unauthorized。
+4. 数据库镜像：服务器能拉 Docker Hub 就用 `postgres:17-alpine`；把 postgres 复制到腾讯云曾多次卡住超时，`postgres-mirror.yml` 留作备用。
+
+`docker-compose.yml` 保持和上游一致，合并 AIHOT 的更新用 `git fetch upstream && git merge upstream/main`。
+
+---
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/banner-dark.png">
