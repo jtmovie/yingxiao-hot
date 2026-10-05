@@ -38,6 +38,23 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
+    services:
+  api:
+    # ……原有内容不动，加上：
+    networks:
+      default: {}
+      dokploy-network:
+        aliases: [aihot-api]   # 网站用这个名字访问它
+
+  web:
+    # 原来是 "${PORT:-3000}:3000"，会把后台页面直接开在服务器公网的 3000 端口，
+    # 还可能和别的服务冲突。改成只在服务器本机能访问：
+    ports:
+      - "127.0.0.1:3100:3000"
+
+networks:
+  dokploy-network:
+    external: true
 
   # Applies the database migrations and seeds the demo sources, then exits.
   setup:
