@@ -85,7 +85,7 @@ jobs:
 
       # 跨境推送容易断，每个镜像重试 3 次
       - name: Copy images to Tencent Cloud TCR
-        timeout-minutes: 30
+        timeout-minutes: 25
         run: |
           copy() {
             for i in 1 2 3; do
@@ -98,13 +98,19 @@ jobs:
           }
           copy "${{ steps.names.outputs.ghcr }}:main" "${{ steps.names.outputs.tcr }}:main"
           copy "${{ steps.names.outputs.ghcr }}:${{ steps.names.outputs.sha }}" "${{ steps.names.outputs.tcr }}:${{ steps.names.outputs.sha }}"
-          # 数据库镜像：已经复制过就跳过
+
+      # 数据库镜像单独一步：从 Docker Hub 拉有时会卡住，失败不影响上面的应用镜像。
+      # 已经复制过就跳过；服务器能直接拉 Docker Hub 时，POSTGRES_IMAGE 填 postgres:17-alpine 也行
+      - name: Copy postgres image to Tencent Cloud TCR
+        timeout-minutes: 15
+        continue-on-error: true
+        run: |
           PG_TCR="ccr.ccs.tencentyun.com/${{ secrets.TCR_NAMESPACE }}/postgres:17-alpine"
           if skopeo inspect "docker://${PG_TCR}" >/dev/null 2>&1; then
             echo "postgres 已在 TCR，跳过"
-          else
-            copy "docker.io/library/postgres:17-alpine" "${PG_TCR}"
+            exit 0
           fi
+          skopeo copy --retry-times 3 "docker://docker.io/library/postgres:17-alpine" "docker://${PG_TCR}"
 
       - name: Summary
         run: |
