@@ -99,18 +99,37 @@ jobs:
           copy "${{ steps.names.outputs.ghcr }}:main" "${{ steps.names.outputs.tcr }}:main"
           copy "${{ steps.names.outputs.ghcr }}:${{ steps.names.outputs.sha }}" "${{ steps.names.outputs.tcr }}:${{ steps.names.outputs.sha }}"
 
-      # 数据库镜像单独一步：从 Docker Hub 拉有时会卡住，失败不影响上面的应用镜像。
-      # 已经复制过就跳过；服务器能直接拉 Docker Hub 时，POSTGRES_IMAGE 填 postgres:17-alpine 也行
+      # 数据库镜像：从 Docker Hub 直接复制到腾讯云会卡住，所以先在这里构建一份推到 ghcr
+      # （deploy/postgres/Dockerfile 只有一行 FROM postgres:17-alpine），再和应用镜像一样从 ghcr 复制。
+      # 失败不影响上面的应用镜像；腾讯云里已经有就跳过。
+      - name: Build postgres image to GitHub Container Registry
+        id: pg-ghcr
+        continue-on-error: true
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/postgres
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.names.outputs.ghcr }}-postgres:17-alpine
+
       - name: Copy postgres image to Tencent Cloud TCR
+        id: pg-tcr
+        if: steps.pg-ghcr.outcome == 'success'
         timeout-minutes: 15
         continue-on-error: true
         run: |
           PG_TCR="ccr.ccs.tencentyun.com/${{ secrets.TCR_NAMESPACE }}/postgres:17-alpine"
-          if skopeo inspect "docker://${PG_TCR}" >/dev/null 2>&1; then
-            echo "postgres 已在 TCR，跳过"
-            exit 0
-          fi
-          skopeo copy --retry-times 3 "docker://docker.io/library/postgres:17-alpine" "docker://${PG_TCR}"
+          for i in 1 2 3; do
+            echo "Copying postgres (attempt $i/3)"
+            if skopeo copy "docker://${{ steps.names.outputs.ghcr }}-postgres:17-alpine" "docker://${PG_TCR}"; then exit 0; fi
+            [ $i -lt 3 ] && sleep 30
+          done
+          exit 1
+
+      # continue-on-error 的步骤失败时界面上仍显示绿色，这里明确报一个警告，免得误以为复制成功
+      - name: Postgres copy status
+        if: steps.pg-ghcr.outcome != 'success' || steps.pg-tcr.outcome != 'success'
+        run: echo "::warning::postgres 镜像没有复制到腾讯云（构建：${{ steps.pg-ghcr.outcome }}，复制：${{ steps.pg-tcr.outcome }}）"
 
       - name: Summary
         run: |
