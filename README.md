@@ -1,4 +1,4 @@
-# 营销通鉴 · 营销行业版 AIHOT
+# 营销通鉴 · 营销行业热点引擎（基于 AIHOT）
 
 这是基于 [AIHOT](https://github.com/KKKKhazix/AIHOT)（MIT）改成的**营销行业版本**，给 [营销通鉴](https://yingxiaoclub.com/news) 的「平台动态」栏目提供内容。AIHOT 的名字和 Logo 不在许可范围内，这里只用它的引擎。
 
