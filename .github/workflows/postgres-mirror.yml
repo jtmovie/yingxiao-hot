@@ -1,0 +1,71 @@
+name: Copy postgres image to Tencent Cloud
+
+# 把 postgres:17-alpine 放进腾讯云镜像仓库，docker-compose.dokploy.yml 的数据库用它
+# （POSTGRES_IMAGE=ccr.ccs.tencentyun.com/<命名空间>/postgres:17-alpine）。
+# 数据库镜像很少要更新，所以只手动运行：Actions → 本流程 → Run workflow。
+# 从 Docker Hub 直接复制到腾讯云会卡住，所以先构建一份推到 ghcr（deploy/postgres/Dockerfile），再从 ghcr 复制，
+# 和应用镜像走同一条路。需要的 Secrets 和 docker-image.yml 相同。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Image names
+        id: names
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "ghcr=ghcr.io/${repo}-postgres:17-alpine" >> "$GITHUB_OUTPUT"
+          echo "tcr=ccr.ccs.tencentyun.com/${{ secrets.TCR_NAMESPACE }}/postgres:17-alpine" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Tencent Cloud TCR
+        uses: docker/login-action@v3
+        with:
+          registry: ccr.ccs.tencentyun.com
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build postgres image to GitHub Container Registry
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/postgres
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.names.outputs.ghcr }}
+
+      - name: Install skopeo
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
+
+      # 跨境推送容易断，重试 5 次；失败就让整个任务失败，不显示成绿色
+      - name: Copy to Tencent Cloud TCR
+        timeout-minutes: 35
+        run: |
+          for i in 1 2 3 4 5; do
+            echo "Copying postgres (attempt $i/5)"
+            if skopeo copy --retry-times 3 "docker://${{ steps.names.outputs.ghcr }}" "docker://${{ steps.names.outputs.tcr }}"; then
+              echo "### postgres 已复制到腾讯云" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            [ $i -lt 5 ] && sleep 30
+          done
+          echo "::error::postgres 复制到腾讯云失败"
+          exit 1
