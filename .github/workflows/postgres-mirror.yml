@@ -1,7 +1,7 @@
 name: Copy postgres image to Tencent Cloud
 
 # 把 postgres:17-alpine 放进腾讯云镜像仓库，docker-compose.dokploy.yml 的数据库用它
-# （POSTGRES_IMAGE=ccr.ccs.tencentyun.com/<命名空间>/postgres:17-alpine）。
+# （POSTGRES_IMAGE=ccr.ccs.tencentyun.com/<命名空间>/yingxiao-hot:postgres-17-alpine，和应用镜像放在同一个仓库，单独建 postgres 仓库时复制一直卡住）。
 # 数据库镜像很少要更新，所以只手动运行：Actions → 本流程 → Run workflow。
 # 从 Docker Hub 直接复制到腾讯云会卡住，所以先构建一份推到 ghcr（deploy/postgres/Dockerfile），再从 ghcr 复制，
 # 和应用镜像走同一条路。需要的 Secrets 和 docker-image.yml 相同。
@@ -25,7 +25,7 @@ jobs:
         run: |
           repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
           echo "ghcr=ghcr.io/${repo}-postgres:17-alpine" >> "$GITHUB_OUTPUT"
-          echo "tcr=ccr.ccs.tencentyun.com/${{ secrets.TCR_NAMESPACE }}/postgres:17-alpine" >> "$GITHUB_OUTPUT"
+          echo "tcr=ccr.ccs.tencentyun.com/${{ secrets.TCR_NAMESPACE }}/yingxiao-hot:postgres-17-alpine" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3

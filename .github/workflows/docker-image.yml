@@ -103,5 +103,5 @@ jobs:
           {
             echo "### 已推送到腾讯云"
             echo "- AIHOT_IMAGE=${{ steps.names.outputs.tcr }}:main（回滚用 :${{ steps.names.outputs.sha }}）"
-            echo "- POSTGRES_IMAGE=ccr.ccs.tencentyun.com/<TCR_NAMESPACE>/postgres:17-alpine"
+            echo "- POSTGRES_IMAGE=ccr.ccs.tencentyun.com/<TCR_NAMESPACE>/yingxiao-hot:postgres-17-alpine（由 postgres-mirror.yml 复制）"
           } >> "$GITHUB_STEP_SUMMARY"
