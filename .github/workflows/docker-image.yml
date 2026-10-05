@@ -1,0 +1,115 @@
+name: Build image and copy to Tencent Cloud
+
+# 照营销通鉴（yingxiaoclub）的做法：国内服务器连不上 GitHub 和 Docker Hub，
+# 镜像在这里构建，先推 ghcr.io，再用 skopeo 复制到腾讯云镜像仓库（TCR），服务器从 TCR 拉。
+# 同时把 postgres:17-alpine 复制一份到 TCR，docker-compose.dokploy.yml 的数据库用它。
+#
+# 需要在这个仓库的 GitHub Secrets 里配置（和 yingxiaoclub 仓库的同名 Secret 填一样的值）：
+#   TCR_USERNAME、TCR_PASSWORD、TCR_NAMESPACE
+# 推送到 TCR 的镜像：
+#   ccr.ccs.tencentyun.com/<TCR_NAMESPACE>/yingxiao-hot:main 和 :sha-<提交前 7 位>（回滚用）
+#   ccr.ccs.tencentyun.com/<TCR_NAMESPACE>/postgres:17-alpine
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-image
+  cancel-in-progress: false
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check secrets
+        env:
+          TCR_USERNAME: ${{ secrets.TCR_USERNAME }}
+          TCR_PASSWORD: ${{ secrets.TCR_PASSWORD }}
+          TCR_NAMESPACE: ${{ secrets.TCR_NAMESPACE }}
+        run: |
+          for name in TCR_USERNAME TCR_PASSWORD TCR_NAMESPACE; do
+            if [ -z "${!name}" ]; then echo "::error::未配置 GitHub Secret $name"; exit 1; fi
+          done
+
+      - name: Image names
+        id: names
+        run: |
+          repo="$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          sha="sha-${GITHUB_SHA::7}"
+          echo "ghcr=ghcr.io/${repo}" >> "$GITHUB_OUTPUT"
+          echo "tcr=ccr.ccs.tencentyun.com/${{ secrets.TCR_NAMESPACE }}/yingxiao-hot" >> "$GITHUB_OUTPUT"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Tencent Cloud TCR
+        uses: docker/login-action@v3
+        with:
+          registry: ccr.ccs.tencentyun.com
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 一个镜像跑所有角色（setup、api、worker、web），见 Dockerfile
+      - name: Build and push to GitHub Container Registry
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.names.outputs.ghcr }}:main
+            ${{ steps.names.outputs.ghcr }}:${{ steps.names.outputs.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 安装 skopeo 用于跨 registry 镜像复制（比 docker buildx imagetools 更可靠）
+      - name: Install skopeo
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq skopeo
+
+      # 跨境推送容易断，每个镜像重试 3 次
+      - name: Copy images to Tencent Cloud TCR
+        timeout-minutes: 30
+        run: |
+          copy() {
+            for i in 1 2 3; do
+              echo "Copying $1 -> $2 (attempt $i/3)"
+              if skopeo copy "docker://$1" "docker://$2"; then return 0; fi
+              [ $i -lt 3 ] && sleep 30
+            done
+            echo "::error::复制失败：$2"
+            return 1
+          }
+          copy "${{ steps.names.outputs.ghcr }}:main" "${{ steps.names.outputs.tcr }}:main"
+          copy "${{ steps.names.outputs.ghcr }}:${{ steps.names.outputs.sha }}" "${{ steps.names.outputs.tcr }}:${{ steps.names.outputs.sha }}"
+          # 数据库镜像：已经复制过就跳过
+          PG_TCR="ccr.ccs.tencentyun.com/${{ secrets.TCR_NAMESPACE }}/postgres:17-alpine"
+          if skopeo inspect "docker://${PG_TCR}" >/dev/null 2>&1; then
+            echo "postgres 已在 TCR，跳过"
+          else
+            copy "docker.io/library/postgres:17-alpine" "${PG_TCR}"
+          fi
+
+      - name: Summary
+        run: |
+          {
+            echo "### 已推送到腾讯云"
+            echo "- AIHOT_IMAGE=${{ steps.names.outputs.tcr }}:main（回滚用 :${{ steps.names.outputs.sha }}）"
+            echo "- POSTGRES_IMAGE=ccr.ccs.tencentyun.com/<TCR_NAMESPACE>/postgres:17-alpine"
+          } >> "$GITHUB_STEP_SUMMARY"
