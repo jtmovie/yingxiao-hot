@@ -100,9 +100,11 @@ export async function collectFindings(now = Date.now()): Promise<Finding[]> {
       });
     }
     // The daily report is composed from its edition time, and tried again every half hour until it exists:
-    // two hours later it is overdue.
+    // two hours later it is overdue. A daily skipped for having nothing in its window (reports/compose.ts
+    // skippedKey) is not overdue.
     if (now >= beijingAt(beijingDate(now), EDITION_TIMES.daily).getTime() + 2 * 3600_000) {
-      const [r] = await sql`SELECT 1 FROM reports WHERE kind = 'daily' AND key = ${beijingDate(now)}`;
+      const [r] = await sql`SELECT 1 FROM reports WHERE kind = 'daily' AND key = ${beijingDate(now)}
+                            UNION ALL SELECT 1 FROM settings WHERE key = ${`report.skipped.daily.${beijingDate(now)}`}`;
       if (!r) {
         out.push({
           key: "report.daily",
